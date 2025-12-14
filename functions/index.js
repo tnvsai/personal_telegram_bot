@@ -1,5 +1,6 @@
 /**
  * Import function triggers from their respective submodules:
+ * Deploy Timestamp: 2025-12-15 01:10
  *
  * const {onCall} = require("firebase-functions/v2/https");
  * const {onDocumentWritten} = require("firebase-functions/v2/firestore");
@@ -33,59 +34,92 @@ exports.telegramBot = functions.https.onRequest(async (req, res) => {
   // 2. Parse Update
   const update = req.body;
 
-  // If no message, just return 200
-  if (!update || !update.message) {
+  if (!update) {
     return res.status(200).send("OK");
   }
 
-  const message = update.message;
-  const chatId = message.chat.id;
-  const text = message.text;
+  // A. HANDLE MESSAGES
+  if (update.message) {
+    const message = update.message;
+    const chatId = message.chat.id;
+    const text = message.text;
 
-  // 3. Handle /start command
-  // Logic: When user sends /start, reply with Welcome message + Resume Button
-  if (text === "/start") {
-    // TRACKING: Save visitor to Firestore
-    const user = message.from;
-    try {
-      await admin.firestore().collection("visitors").doc(String(user.id)).set({
-        first_name: user.first_name || "",
-        last_name: user.last_name || "",
-        username: user.username || "",
-        last_seen: admin.firestore.FieldValue.serverTimestamp(),
-        visit_count: admin.firestore.FieldValue.increment(1),
-      }, { merge: true });
-      logger.info("Visitor tracked", { userId: user.id, username: user.username });
-    } catch (error) {
-      logger.error("Failed to track visitor", error);
-    }
+    // Handle /start command
+    if (text === "/start") {
+      // TRACKING: Save visitor to Firestore
+      const user = message.from;
+      try {
+        await admin.firestore().collection("visitors").doc(String(user.id)).set({
+          first_name: user.first_name || "",
+          last_name: user.last_name || "",
+          username: user.username || "",
+          last_seen: admin.firestore.FieldValue.serverTimestamp(),
+          visit_count: admin.firestore.FieldValue.increment(1),
+        }, { merge: true });
+        logger.info("Visitor tracked", { userId: user.id, username: user.username });
+      } catch (error) {
+        logger.error("Failed to track visitor", error);
+      }
 
-    // Construct the response payload for Telegram Webhook
-    // This allows us to send a message WITHOUT making an outbound HTTP request.
-    const responsePayload = {
-      method: "sendMessage",
-      chat_id: chatId,
-      text: "Hi, I'm Sai\nEmbedded Software Engineer",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "📄 View My Resume",
-              // web_app type opens the URL inside Telegram
-              web_app: { url: "https://tnvsai.github.io/resume/" },
-            },
+      const responsePayload = {
+        method: "sendMessage",
+        chat_id: chatId,
+        text: "Hi, I'm Sai\nHow can I help you?",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "📄 View My Resume", web_app: { url: "https://tnvsai.github.io/resume/" } },
+            ],
+            [
+              { text: "🚀 Projects", callback_data: "show_projects" },
+              { text: "📬 Contact", callback_data: "show_contact" },
+            ],
           ],
-        ],
-      },
-    };
-
-    // Log for debugging
-    logger.info("Received /start, sending welcome message.");
-
-    return res.status(200).json(responsePayload);
+        },
+      };
+      return res.status(200).json(responsePayload);
+    }
   }
 
-  // Handle other messages (Default response or ignore)
-  // For now, just ignore other messages to be minimal.
+  // B. HANDLE CALLBACK QUERIES (Button Clicks)
+  if (update.callback_query) {
+    const callbackQuery = update.callback_query;
+    const chatId = callbackQuery.message.chat.id;
+    const data = callbackQuery.data;
+
+    let responseText = "";
+
+    if (data === "show_projects") {
+      responseText = "🚀 **My Key Projects**\n\n" +
+        "1. **STM32F103RB_Baremetal**\n" +
+        "   baremetal project for STM32F103RB.\n" +
+        "   [View on GitHub](https://github.com/tnvsai/STM32F103RB_Baremetal)\n\n" +
+        "2. **YatraMate**\n" +
+        "   smart display for bike.\n" +
+        "   [View on GitHub](https://github.com/tnvsai/YatraMate)\n\n" +
+        "3. **NagaCryptTool**\n" +
+        "   encryption tool.\n" +
+        "   [View on GitHub](https://github.com/tnvsai/NagaCryptTool)"
+        ;
+    } else if (data === "show_contact") {
+      responseText = "📬 **Contact Me**\n\n" +
+        "• **GitHub**: [tnvsai](https://github.com/tnvsai)\n" +
+        "• **Email**: tnvsai@gmail.com\n" +
+        "• **Youtube**: [Sai Tadepalli](https://www.youtube.com/@tnvsai)\n";
+    }
+
+    if (responseText) {
+      // We answer the callback query and send a new message
+      const responsePayload = {
+        method: "sendMessage",
+        chat_id: chatId,
+        text: responseText,
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      };
+      return res.status(200).json(responsePayload);
+    }
+  }
+
   return res.status(200).send("OK");
 });
